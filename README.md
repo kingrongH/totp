@@ -1,0 +1,20 @@
+
+`TOTP` project is used for calculate a [Time-based One-time Password](https://en.wikipedia.org/wiki/Time-based_One-time_Password_algorithm)
+For more infomation, please check the link above
+**Note: This crate takes base32-encrypted secret
+
+
+## Example
+
+```rust
+use totp::*;
+
+fn main() -> Result<(), Box<dyn std::error::Error>>{
+    let x = "XW7HPZJ2L3AMPWQN";
+    let totp = TOTP::default(x);
+    let code = totp.get_code()?;
+    let left_time = totp.get_left_time();
+    println!("code: {:06}\r\nleft time: {}s", code, left_time);
+    Ok(())
+}
+```
