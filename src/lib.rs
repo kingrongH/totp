@@ -33,8 +33,8 @@ use crypto::mac::Mac;
 ///}
 /// ```
 
-pub struct TOTP {
-    secret: String,
+pub struct TOTP <'a> {
+    secret: &'a [u8],
     time_step: f64, 
     epoch_start: i64,
     encryption: Encryption,
@@ -47,10 +47,10 @@ pub enum Encryption {
     MD5,
 }
 
-impl TOTP {
-    pub fn new(secret: &str, time_step: f64, epoch_start: i64, encryption: Encryption) -> Self {
+impl<'a> TOTP<'a>{
+    pub fn new(secret: &'a [u8], time_step: f64, epoch_start: i64, encryption: Encryption) -> Self {
         Self {
-            secret: secret.to_string(),
+            secret,
             time_step,
             epoch_start,
             encryption,
@@ -61,9 +61,9 @@ impl TOTP {
     /// 1. time_step: 30 seconds
     /// 2. epoch_start: 0
     /// 3. encryption: SHA1
-    pub fn default(secret: &str) -> Self {
+    pub fn default(secret: &'a [u8]) -> Self {
         Self {
-            secret: secret.to_string(),
+            secret,
             time_step: 30.0,
             epoch_start: 0,
             encryption: Encryption::SHA1,
@@ -75,17 +75,15 @@ impl TOTP {
     /// when parse secret occurs error
     pub fn get_code(&self) -> Result<u32, ParseError>{
         let time_count:i64 = (((Utc::now().timestamp_millis() - self.epoch_start) as f64/1000.0 + 0.5)/self.time_step) as i64;
-        //let key = self.secret.as_bytes();
-        let key = base32_to_secret(&self.secret)?;
         let code = match self.encryption {
             Encryption::SHA1 => {
-                let mut hmac = Hmac::new(Sha1::new(), &key);
+                let mut hmac = Hmac::new(Sha1::new(), self.secret);
                 hmac.input(&time_count.to_be_bytes());
                 let result = hmac.result();
                 result.code().to_vec()
             },
             Encryption::MD5 => {
-                let mut hmac = Hmac::new(Md5::new(), &key);
+                let mut hmac = Hmac::new(Md5::new(), self.secret);
                 hmac.input(&time_count.to_be_bytes());
                 let result = hmac.result();
                 result.code().to_vec()
@@ -109,6 +107,10 @@ impl TOTP {
 
 }
 
+/// base32 decode, return raw data with Vec<u8> type
+/// # Error
+/// 1. When there is a invalid base32 char
+/// 2. Parse str to u8 occurs error
 pub fn base32_to_secret(s: &str) -> Result<Vec<u8>, ParseError> {
     let mut all_bits = String::new();
     for b in s.bytes() {
