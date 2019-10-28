@@ -91,11 +91,11 @@ impl<'a> TOTP<'a>{
         };
         let offset = (code.last().unwrap() & 0x0f) as usize;
         let mut otp = (&code[offset..offset+4]).to_vec();
-        otp[0] = otp[0] & 0x7f;
+        otp[0] &= 0x7f;
         let hex:String = otp.iter().map(|chunk| {
             format!("{:02X}", chunk)
         }).collect();
-        Ok(u32::from_str_radix(&hex, 16)?%1000000)
+        Ok(u32::from_str_radix(&hex, 16)?%1_000_000)
     }
 
     /// get left valid of current totp
