@@ -3,14 +3,19 @@
 //! `TOTP` project is used for calculate a [Time-based One-time Password](https://en.wikipedia.org/wiki/Time-based_One-time_Password_algorithm)
 //! For more infomation, please check the link above
 
+use error::*;
+use chrono::prelude::*;
+use hmac::{ Hmac, Mac, NewMac };
+use md5::Md5;
+use sha1::Sha1;
+use generic_array::{ GenericArray, typenum::consts::U4 };
+
+use std::collections::HashMap;
+
 pub mod error;
 
-use error::*;
-use crypto::hmac::Hmac;
-use crypto::sha1::Sha1;
-use crypto::md5::Md5;
-use chrono::prelude::*;
-use crypto::mac::Mac;
+type HmacSha1 = Hmac<Sha1>;
+type HmacMd5 = Hmac<Md5>;
 
 /// A TOTP Unit which contains some elements used to calculate totp
 ///
@@ -73,29 +78,27 @@ impl<'a> TOTP<'a>{
     /// get result code of current totp
     /// # Error
     /// when parse secret occurs error
-    pub fn get_code(&self) -> Result<u32, ParseError>{
+    pub fn get_code(&self) -> u32 {
         let time_count:i64 = (((Utc::now().timestamp_millis() - self.epoch_start) as f64/1000.0 + 0.5)/self.time_step) as i64;
-        let code = match self.encryption {
+        let code: GenericArray<u8, U4> = match self.encryption {
             Encryption::SHA1 => {
-                let mut hmac = Hmac::new(Sha1::new(), self.secret);
-                hmac.input(&time_count.to_be_bytes());
-                let result = hmac.result();
-                result.code().to_vec()
+                let mut hmac = HmacSha1::new_varkey(self.secret.into()).unwrap();
+                hmac.update(&time_count.to_be_bytes());
+                let code = hmac.finalize().into_bytes();
+                let offset = (code.last().unwrap() & 0x0f) as usize;
+                GenericArray::from_slice(&code[offset..offset+4]).clone()
             },
             Encryption::MD5 => {
-                let mut hmac = Hmac::new(Md5::new(), self.secret);
-                hmac.input(&time_count.to_be_bytes());
-                let result = hmac.result();
-                result.code().to_vec()
+                let mut hmac = HmacMd5::new(self.secret.into());
+                hmac.update(&time_count.to_be_bytes());
+                let code = hmac.finalize().into_bytes();
+                let offset = (code.last().unwrap() & 0x0f) as usize;
+                GenericArray::from_slice(&code[offset..offset+4]).clone()
             }
         };
-        let offset = (code.last().unwrap() & 0x0f) as usize;
-        let mut otp = (&code[offset..offset+4]).to_vec();
+        let mut otp: [u8; 4] = code.into();
         otp[0] &= 0x7f;
-        let hex:String = otp.iter().map(|chunk| {
-            format!("{:02X}", chunk)
-        }).collect();
-        Ok(u32::from_str_radix(&hex, 16)?%1_000_000)
+        u32::from_be_bytes(otp)
     }
 
     /// get left valid of current totp
@@ -109,26 +112,43 @@ impl<'a> TOTP<'a>{
 
 /// base32 decode, return raw data with Vec<u8> type
 /// # Error
-/// 1. When there is a invalid base32 char
-/// 2. Parse str to u8 occurs error
+/// When there is a invalid base32 char
 pub fn base32_to_secret(s: &str) -> Result<Vec<u8>, ParseError> {
-    let mut all_bits = String::new();
-    for b in s.bytes() {
-        let x:u8;
-        if b >= 65 && b<=90 {
-            x = b-65;
-        } else if b >= 50 && b<= 55 {
-            x = b-50+26;
-        } else {
-            return Err(ParseError::InvalidBase32Char);
-        }
-        let bits = format!("{:05b}", x); 
-        all_bits.push_str(&bits);
+    const BASE32_VALUES: [[bool; 5]; 32] = [
+        [false, false, false, false, false], [false, false, false, false, true], [false, false, false, true, false], [false, false, false, true, true],
+        [false, false, true, false, false], [false, false, true, false, true], [false, false, true, true, false], [false, false, true, true, true],
+        [false, true, false, false, false], [false, true, false, false, true], [false, true, false, true, false], [false, true, false, true, true],
+        [false, true, true, false, false], [false, true, true, false, true], [false, true, true, true, false], [false, true, true, true, true],
+        [true, false, false, false, false], [true, false, false, false, true], [true, false, false, true, false], [true, false, false, true, true],
+        [true, false, true, false, false], [true, false, true, false, true], [true, false, true, true, false], [true, false, true, true, true],
+        [true, true, false, false, false], [true, true, false, false, true], [true, true, false, true, false], [true, true, false, true, true],
+        [true, true, true, false, false], [true, true, true, false, true], [true, true, true, true, false], [true, true, true, true, true]
+    ];
+
+    const BASE32_CHARS: [char; 32] = [
+        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H','I',
+        'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q',
+        'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
+        'Z', '2', '3', '4', '5', '6', '7'
+    ];
+
+    let base32_map: HashMap<&char, &[bool; 5]> = BASE32_CHARS.iter().zip(BASE32_VALUES.iter()).collect();
+
+    let mut all_bits = Vec::new();
+    for mut c in s.chars() {
+        // non ascii will stay unchanged, nice~
+        c.make_ascii_uppercase();
+        all_bits.extend_from_slice(*base32_map.get(&c).ok_or(ParseError::InvalidBase32Char(c))?);
     }
-    let all_chars:Vec<char> = all_bits.chars().collect();
-    let all_u8:Result<Vec<u8>, _> = all_chars.chunks(8).map(|chunk| {
-        let s:String = chunk.iter().collect();
-        u8::from_str_radix(&s, 2)
+
+    let bytes = all_bits.chunks(8).map(|bits| {
+        bits.iter().rev().enumerate().fold(0u8, |init, (index, bit)| {
+            if *bit {
+                // index is always in 0-7
+                return init + 2u8.pow(index as u32)
+            }
+            init
+        })
     }).collect();
-    Ok(all_u8?)
+    Ok(bytes)
 }
