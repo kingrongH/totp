@@ -114,6 +114,8 @@ impl<'a> TOTP<'a>{
 /// # Error
 /// When there is a invalid base32 char
 pub fn base32_to_secret(s: &str) -> Result<Vec<u8>, ParseError> {
+    
+    // use bool array to represent bits of base32 bits
     const BASE32_VALUES: [[bool; 5]; 32] = [
         [false, false, false, false, false], [false, false, false, false, true], [false, false, false, true, false], [false, false, false, true, true],
         [false, false, true, false, false], [false, false, true, false, true], [false, false, true, true, false], [false, false, true, true, true],
@@ -125,6 +127,7 @@ pub fn base32_to_secret(s: &str) -> Result<Vec<u8>, ParseError> {
         [true, true, true, false, false], [true, true, true, false, true], [true, true, true, true, false], [true, true, true, true, true]
     ];
 
+    // potential base32 chars, which is one-to-one mapping to the BASE32_VALUES above
     const BASE32_CHARS: [char; 32] = [
         'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H','I',
         'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q',
