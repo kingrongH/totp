@@ -13,7 +13,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>>{
     let totp = TOTP::default(&key);
     let code = totp.get_code();
     let left_time = totp.get_left_time();
-    println!("code: {:06}\r\nleft time: {}s", code, left_time);
+    let code = code % 1000000;
+    println!("code: {}\n left time: {}s", code, left_time);
     Ok(())
 }
 
