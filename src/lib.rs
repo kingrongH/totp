@@ -7,8 +7,9 @@ use error::*;
 use chrono::prelude::*;
 use hmac::{ Hmac, Mac, NewMac };
 use md5::Md5;
+use once_cell::sync::Lazy;
 use sha1::Sha1;
-use generic_array::{ GenericArray, typenum::consts::U4 };
+use generic_array::{ GenericArray, typenum::U4 };
 
 use std::collections::HashMap;
 
@@ -16,6 +17,34 @@ pub mod error;
 
 type HmacSha1 = Hmac<Sha1>;
 type HmacMd5 = Hmac<Md5>;
+
+    
+// use bool array to represent bits of base32 bits
+const BASE32_VALUES: [[bool; 5]; 32] = [
+    [false, false, false, false, false], [false, false, false, false, true], [false, false, false, true, false], [false, false, false, true, true],
+    [false, false, true, false, false], [false, false, true, false, true], [false, false, true, true, false], [false, false, true, true, true],
+    [false, true, false, false, false], [false, true, false, false, true], [false, true, false, true, false], [false, true, false, true, true],
+    [false, true, true, false, false], [false, true, true, false, true], [false, true, true, true, false], [false, true, true, true, true],
+    [true, false, false, false, false], [true, false, false, false, true], [true, false, false, true, false], [true, false, false, true, true],
+    [true, false, true, false, false], [true, false, true, false, true], [true, false, true, true, false], [true, false, true, true, true],
+    [true, true, false, false, false], [true, true, false, false, true], [true, true, false, true, false], [true, true, false, true, true],
+    [true, true, true, false, false], [true, true, true, false, true], [true, true, true, true, false], [true, true, true, true, true]
+];
+
+// potential base32 chars, which is one-to-one mapping to the BASE32_VALUES above
+const BASE32_CHARS: [char; 32] = [
+    'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H','I',
+    'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q',
+    'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
+    'Z', '2', '3', '4', '5', '6', '7'
+];
+
+// base32 char -> bits map 
+static BASE32_MAP: Lazy<HashMap<&'static char, &'static [bool; 5]>> = Lazy::new(|| {
+    BASE32_CHARS.iter().zip(BASE32_VALUES.iter()).collect()
+});
+
+
 
 /// A TOTP Unit which contains some elements used to calculate totp
 ///
@@ -114,34 +143,11 @@ impl<'a> TOTP<'a>{
 /// # Error
 /// When there is a invalid base32 char
 pub fn base32_to_secret(s: &str) -> Result<Vec<u8>, ParseError> {
-    
-    // use bool array to represent bits of base32 bits
-    const BASE32_VALUES: [[bool; 5]; 32] = [
-        [false, false, false, false, false], [false, false, false, false, true], [false, false, false, true, false], [false, false, false, true, true],
-        [false, false, true, false, false], [false, false, true, false, true], [false, false, true, true, false], [false, false, true, true, true],
-        [false, true, false, false, false], [false, true, false, false, true], [false, true, false, true, false], [false, true, false, true, true],
-        [false, true, true, false, false], [false, true, true, false, true], [false, true, true, true, false], [false, true, true, true, true],
-        [true, false, false, false, false], [true, false, false, false, true], [true, false, false, true, false], [true, false, false, true, true],
-        [true, false, true, false, false], [true, false, true, false, true], [true, false, true, true, false], [true, false, true, true, true],
-        [true, true, false, false, false], [true, true, false, false, true], [true, true, false, true, false], [true, true, false, true, true],
-        [true, true, true, false, false], [true, true, true, false, true], [true, true, true, true, false], [true, true, true, true, true]
-    ];
-
-    // potential base32 chars, which is one-to-one mapping to the BASE32_VALUES above
-    const BASE32_CHARS: [char; 32] = [
-        'A', 'B', 'C', 'D', 'E', 'F', 'G', 'H','I',
-        'J', 'K', 'L', 'M', 'N', 'O', 'P', 'Q',
-        'R', 'S', 'T', 'U', 'V', 'W', 'X', 'Y',
-        'Z', '2', '3', '4', '5', '6', '7'
-    ];
-
-    let base32_map: HashMap<&char, &[bool; 5]> = BASE32_CHARS.iter().zip(BASE32_VALUES.iter()).collect();
-
     let mut all_bits = Vec::new();
     for mut c in s.chars() {
         // non ascii will stay unchanged, nice~
         c.make_ascii_uppercase();
-        all_bits.extend_from_slice(*base32_map.get(&c).ok_or(ParseError::InvalidBase32Char(c))?);
+        all_bits.extend_from_slice(*BASE32_MAP.get(&c).ok_or(ParseError::InvalidBase32Char(c))?);
     }
 
     let bytes = all_bits.chunks(8).map(|bits| {
